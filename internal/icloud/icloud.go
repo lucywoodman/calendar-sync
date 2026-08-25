@@ -2,9 +2,12 @@
 package icloud
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"slices"
 	"time"
 
@@ -34,8 +37,12 @@ type Client struct {
 
 // Connect authenticates with an app-specific password and discovers the
 // account's calendars. iCloud rejects a normal Apple ID password here.
-func Connect(ctx context.Context, endpoint, username, password string, timeout time.Duration) (*Client, error) {
-	httpClient := webdav.HTTPClientWithBasicAuth(&http.Client{Timeout: timeout}, username, password)
+func Connect(ctx context.Context, endpoint, username, password string, timeout time.Duration, debug bool) (*Client, error) {
+	base := &http.Client{Timeout: timeout}
+	if debug {
+		base.Transport = debugTransport{inner: http.DefaultTransport}
+	}
+	httpClient := webdav.HTTPClientWithBasicAuth(base, username, password)
 	dav, err := caldav.NewClient(httpClient, endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("building CalDAV client: %w", err)
@@ -93,7 +100,16 @@ func SupportsEvents(cal caldav.Calendar) bool {
 // Expanding server-side is the whole game: an unexpanded weekly stand-up comes
 // back as a single event with a recurrence rule, which would leave 09:30 looking
 // free every day but the first.
-func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, end time.Time) ([]ical.Event, error) {
+// QueryResult is what one query returned. Objects is kept alongside the events
+// because an empty Events slice has two very different causes - the server
+// matched nothing, or it matched objects and sent them with no VEVENT inside -
+// and they need telling apart.
+type QueryResult struct {
+	Objects int
+	Events  []ical.Event
+}
+
+func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, end time.Time) (QueryResult, error) {
 	// Ask for the whole object rather than naming the components wanted.
 	// Spelling out <comp name="VEVENT"> got VEVENTs back with no properties at
 	// all from iCloud - the right events, entirely empty - so allcomp it is.
@@ -117,15 +133,46 @@ func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, 
 
 	objects, err := c.dav.QueryCalendar(ctx, cal.Path, query)
 	if err != nil {
-		return nil, fmt.Errorf("querying calendar %q: %w", cal.Name, err)
+		return QueryResult{}, fmt.Errorf("querying calendar %q: %w", cal.Name, err)
 	}
 
-	var out []ical.Event
+	result := QueryResult{Objects: len(objects)}
 	for _, object := range objects {
 		if object.Data == nil {
 			continue
 		}
-		out = append(out, object.Data.Events()...)
+		result.Events = append(result.Events, object.Data.Events()...)
 	}
-	return out, nil
+	return result, nil
+}
+
+// debugTransport reports what actually went over the wire.
+//
+// Request bodies are the CalDAV query XML, which contains no personal data and
+// is safe to paste anywhere. Responses are reported as a status and a byte
+// count only — that body is Lucy's diary, and the size is enough to tell an
+// empty multistatus from a full one.
+type debugTransport struct{ inner http.RoundTripper }
+
+func (d debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var reqBody []byte
+	if req.Body != nil {
+		reqBody, _ = io.ReadAll(req.Body)
+		req.Body = io.NopCloser(bytes.NewReader(reqBody))
+	}
+
+	resp, err := d.inner.RoundTrip(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[http] %s %s -> %v\n", req.Method, req.URL.Path, err)
+		return resp, err
+	}
+
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
+	fmt.Fprintf(os.Stderr, "[http] %s %s -> %s (%d bytes)\n",
+		req.Method, req.URL.Path, resp.Status, len(respBody))
+	if len(reqBody) > 0 {
+		fmt.Fprintf(os.Stderr, "[http] sent:\n%s\n", reqBody)
+	}
+	return resp, nil
 }

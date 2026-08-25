@@ -48,13 +48,13 @@ func newRootCmd() *cobra.Command {
 
 func newPushCmd() *cobra.Command {
 	var startStr, endStr string
-	var dryRun, noExpand bool
+	var dryRun, noExpand, debug bool
 
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Fetch events and push them to Genki Tracker",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runPush(cmd.Context(), startStr, endStr, dryRun, noExpand)
+			return runPush(cmd.Context(), startStr, endStr, dryRun, noExpand, debug)
 		},
 	}
 	cmd.Flags().StringVar(&startStr, "start", "", "First date to sync (YYYY-MM-DD, default: today)")
@@ -66,6 +66,7 @@ func newPushCmd() *cobra.Command {
 	// only registers on its first occurrence. It exists so a server that
 	// mishandles the request can be identified rather than guessed at.
 	cmd.Flags().BoolVar(&noExpand, "no-expand", false, "Don't ask the server to expand recurring events (diagnostic)")
+	cmd.Flags().BoolVar(&debug, "debug", false, "Print the CalDAV requests sent and the status of each reply")
 	return cmd
 }
 
@@ -81,7 +82,7 @@ func newCalendarsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := icloud.Connect(cmd.Context(), cfg.caldavURL, cfg.username, cfg.appPassword, timeout)
+			client, err := icloud.Connect(cmd.Context(), cfg.caldavURL, cfg.username, cfg.appPassword, timeout, false)
 			if err != nil {
 				return err
 			}
@@ -153,7 +154,7 @@ func loadConfig() (config, error) {
 	return cfg, nil
 }
 
-func runPush(ctx context.Context, startStr, endStr string, dryRun, noExpand bool) error {
+func runPush(ctx context.Context, startStr, endStr string, dryRun, noExpand, debug bool) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -168,7 +169,7 @@ func runPush(ctx context.Context, startStr, endStr string, dryRun, noExpand bool
 		return err
 	}
 
-	client, err := icloud.Connect(ctx, cfg.caldavURL, cfg.username, cfg.appPassword, timeout)
+	client, err := icloud.Connect(ctx, cfg.caldavURL, cfg.username, cfg.appPassword, timeout, debug)
 	if err != nil {
 		return err
 	}
@@ -200,9 +201,10 @@ func runPush(ctx context.Context, startStr, endStr string, dryRun, noExpand bool
 		// Counted before mapping, because "the server sent nothing" and "we
 		// discarded everything it sent" are different faults and look identical
 		// in the result.
-		fmt.Printf("  %s: %d event(s) returned for %s..%s\n",
-			cal.Name, len(found), start.Format(dateLayout), queryEnd.Format(dateLayout))
-		for _, raw := range found {
+		fmt.Printf("  %s: %d object(s), %d event(s) for %s..%s\n",
+			cal.Name, found.Objects, len(found.Events),
+			start.Format(dateLayout), queryEnd.Format(dateLayout))
+		for _, raw := range found.Events {
 			mapped := false
 			for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
 				converted, ok, err := mapper.Convert(raw, day, away)
