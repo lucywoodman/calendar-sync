@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/emersion/go-ical"
@@ -48,9 +49,35 @@ func Connect(ctx context.Context, endpoint, username, password string, timeout t
 	return &Client{dav: dav, calendars: calendars}, nil
 }
 
-// Calendars lists the discovered calendars.
+// Calendars lists every discovered collection, including ones that hold no
+// events. Only `calendar-sync calendars` wants this; a sync wants EventCalendars.
 func (c *Client) Calendars() []caldav.Calendar {
 	return c.calendars
+}
+
+// EventCalendars returns just the collections that hold events.
+//
+// Apple serves Reminders lists from the same endpoint as calendars, and they're
+// VTODO collections — asking one for VEVENTs is wasted work, and depending on
+// the server, an error rather than an empty result.
+func (c *Client) EventCalendars() []caldav.Calendar {
+	var out []caldav.Calendar
+	for _, cal := range c.calendars {
+		if SupportsEvents(cal) {
+			out = append(out, cal)
+		}
+	}
+	return out
+}
+
+// SupportsEvents reports whether a collection holds events. An empty
+// SupportedComponentSet means the server didn't say, which RFC 4791 defines as
+// supporting every component — so absent has to mean yes, not no.
+func SupportsEvents(cal caldav.Calendar) bool {
+	if len(cal.SupportedComponentSet) == 0 {
+		return true
+	}
+	return slices.Contains(cal.SupportedComponentSet, ical.CompEvent)
 }
 
 // EventsBetween returns every VEVENT in one calendar that overlaps

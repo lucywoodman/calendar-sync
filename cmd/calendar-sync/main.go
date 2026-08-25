@@ -71,7 +71,14 @@ func newCalendarsCmd() *cobra.Command {
 				return err
 			}
 			for _, cal := range client.Calendars() {
-				fmt.Println(cal.Name)
+				if icloud.SupportsEvents(cal) {
+					fmt.Println(cal.Name)
+					continue
+				}
+				// Apple's Reminders lists come back from the same discovery.
+				// Shown rather than hidden, so a calendar missing from this
+				// list is obviously missing rather than quietly filtered.
+				fmt.Printf("%s  (no events - skipped)\n", cal.Name)
 			}
 			return nil
 		},
@@ -151,7 +158,7 @@ func runPush(ctx context.Context, startStr, endStr string) error {
 	httpClient := &http.Client{Timeout: timeout}
 
 	byDate := map[string][]events.Event{}
-	for _, cal := range client.Calendars() {
+	for _, cal := range client.EventCalendars() {
 		away := cfg.awayCalendar != "" && strings.EqualFold(cal.Name, cfg.awayCalendar)
 		found, err := client.EventsBetween(ctx, cal, start, queryEnd)
 		if err != nil {
@@ -218,8 +225,11 @@ func parseDate(value string, loc *time.Location) (time.Time, error) {
 	return d, nil
 }
 
+// hasCalendar checks the event calendars, not every collection: naming a
+// Reminders list as AWAY_CALENDAR would otherwise pass this check and then
+// never mark a single day as away.
 func hasCalendar(client *icloud.Client, name string) bool {
-	for _, cal := range client.Calendars() {
+	for _, cal := range client.EventCalendars() {
 		if strings.EqualFold(cal.Name, name) {
 			return true
 		}
