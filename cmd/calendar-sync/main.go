@@ -10,6 +10,13 @@ import (
 	"strings"
 	"time"
 
+	// Embeds the timezone database in the binary. The sync image is bare
+	// Alpine, which ships none, so CALENDAR_TZ would otherwise fail with
+	// "unknown time zone Europe/London" only once deployed. Carrying it here
+	// rather than apk-installing tzdata keeps that working whatever the image
+	// is built from later.
+	_ "time/tzdata"
+
 	"github.com/lucywoodman/calendar-sync/internal/events"
 	"github.com/lucywoodman/calendar-sync/internal/genki"
 	"github.com/lucywoodman/calendar-sync/internal/icloud"
