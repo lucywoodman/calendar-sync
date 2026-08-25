@@ -78,14 +78,21 @@ func newCalendarsCmd() *cobra.Command {
 				return err
 			}
 			for _, cal := range client.Calendars() {
-				if icloud.SupportsEvents(cal) {
-					fmt.Println(cal.Name)
-					continue
+				// The component set is shown because it's what the skip
+				// decision turns on, and an empty one means the server didn't
+				// say rather than that it holds nothing.
+				components := "unspecified"
+				if len(cal.SupportedComponentSet) > 0 {
+					components = strings.Join(cal.SupportedComponentSet, ",")
 				}
 				// Apple's Reminders lists come back from the same discovery.
 				// Shown rather than hidden, so a calendar missing from this
 				// list is obviously missing rather than quietly filtered.
-				fmt.Printf("%s  (no events - skipped)\n", cal.Name)
+				skipped := ""
+				if !icloud.SupportsEvents(cal) {
+					skipped = "  (no events - skipped)"
+				}
+				fmt.Printf("%s  [%s]%s\n", cal.Name, components, skipped)
 			}
 			return nil
 		},
@@ -164,13 +171,23 @@ func runPush(ctx context.Context, startStr, endStr string) error {
 	mapper := events.Mapper{Loc: cfg.loc, Email: cfg.username}
 	httpClient := &http.Client{Timeout: timeout}
 
+	calendars := client.EventCalendars()
+	if len(calendars) == 0 {
+		return fmt.Errorf("no calendars hold events; run `calendar-sync calendars` to see what was discovered")
+	}
+
 	byDate := map[string][]events.Event{}
-	for _, cal := range client.EventCalendars() {
+	for _, cal := range calendars {
 		away := cfg.awayCalendar != "" && strings.EqualFold(cal.Name, cfg.awayCalendar)
 		found, err := client.EventsBetween(ctx, cal, start, queryEnd)
 		if err != nil {
 			return err
 		}
+		// Counted before mapping, because "the server sent nothing" and "we
+		// discarded everything it sent" are different faults and look identical
+		// in the result.
+		fmt.Printf("  %s: %d event(s) returned for %s..%s\n",
+			cal.Name, len(found), start.Format(dateLayout), queryEnd.Format(dateLayout))
 		for _, raw := range found {
 			for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
 				converted, ok, err := mapper.Convert(raw, day, away)
