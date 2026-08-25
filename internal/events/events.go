@@ -91,6 +91,29 @@ func (m Mapper) Convert(e ical.Event, day time.Time, away bool) (Event, bool, er
 	return out, true, nil
 }
 
+// Diagnose describes a raw event that mapped onto no day in the range asked
+// for. The server's time-range filter matched it, so a DTSTART outside that
+// range means the occurrence it matched was never expanded — the master event
+// arrived instead, carrying its original start date.
+func Diagnose(e ical.Event, loc *time.Location) string {
+	summary, _ := e.Props.Text(ical.PropSummary)
+	if summary == "" {
+		summary = "(no title)"
+	}
+	start := "unreadable"
+	if s, err := e.DateTimeStart(loc); err == nil {
+		start = s.In(loc).Format(time.RFC3339)
+	}
+	recurring := "no"
+	if e.Props.Get(ical.PropRecurrenceRule) != nil {
+		recurring = "yes"
+	}
+	if e.Props.Get(ical.PropRecurrenceID) != nil {
+		recurring = "expanded occurrence"
+	}
+	return fmt.Sprintf("%s  start=%s recurring=%s allDay=%t", summary, start, recurring, isAllDay(e))
+}
+
 // busy answers whether the event actually occupies Lucy's time. A meeting she
 // declined, one marked free, and one that's been cancelled all leave the hour
 // available — counting them as busy would hide windows she could train in.

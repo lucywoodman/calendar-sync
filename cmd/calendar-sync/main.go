@@ -197,15 +197,22 @@ func runPush(ctx context.Context, startStr, endStr string, dryRun bool) error {
 		fmt.Printf("  %s: %d event(s) returned for %s..%s\n",
 			cal.Name, len(found), start.Format(dateLayout), queryEnd.Format(dateLayout))
 		for _, raw := range found {
+			mapped := false
 			for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
 				converted, ok, err := mapper.Convert(raw, day, away)
 				if err != nil {
 					return err
 				}
 				if ok {
+					mapped = true
 					date := day.Format(dateLayout)
 					byDate[date] = append(byDate[date], converted)
 				}
+			}
+			// The server matched this event against the range, so landing on no
+			// day means we disagree with it about when the event is.
+			if !mapped && dryRun {
+				fmt.Printf("    unmapped: %s\n", events.Diagnose(raw, cfg.loc))
 			}
 		}
 	}
