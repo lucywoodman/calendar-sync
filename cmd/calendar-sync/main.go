@@ -48,16 +48,20 @@ func newRootCmd() *cobra.Command {
 
 func newPushCmd() *cobra.Command {
 	var startStr, endStr string
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Fetch events and push them to Genki Tracker",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runPush(cmd.Context(), startStr, endStr)
+			return runPush(cmd.Context(), startStr, endStr, dryRun)
 		},
 	}
 	cmd.Flags().StringVar(&startStr, "start", "", "First date to sync (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&endStr, "end", "", "Last date to sync (YYYY-MM-DD, default: tomorrow)")
+	// Checking the mapping shouldn't need somewhere to push to. Without this,
+	// working out why a day looked free meant running against a live Genki.
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be pushed, and push nothing")
 	return cmd
 }
 
@@ -125,9 +129,9 @@ func loadConfig() (config, error) {
 	if cfg.username == "" || cfg.appPassword == "" {
 		return config{}, fmt.Errorf("ICLOUD_USERNAME and ICLOUD_APP_PASSWORD environment variables are required")
 	}
-	if cfg.genkiURL == "" || cfg.genkiPassword == "" {
-		return config{}, fmt.Errorf("GENKI_URL and GENKI_PASSWORD environment variables are required")
-	}
+	// Genki is not checked here: `calendars` and `push --dry-run` never reach
+	// it, and demanding credentials for a command that can't use them makes the
+	// two commands you'd reach for while diagnosing the hardest to run.
 
 	// Required rather than defaulted to time.Local: a container's clock is UTC
 	// unless told otherwise, and Genki stores local times. Defaulting would put
@@ -145,10 +149,14 @@ func loadConfig() (config, error) {
 	return cfg, nil
 }
 
-func runPush(ctx context.Context, startStr, endStr string) error {
+func runPush(ctx context.Context, startStr, endStr string, dryRun bool) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
+	}
+
+	if !dryRun && (cfg.genkiURL == "" || cfg.genkiPassword == "") {
+		return fmt.Errorf("GENKI_URL and GENKI_PASSWORD environment variables are required (or use --dry-run)")
 	}
 
 	start, end, err := dateRange(startStr, endStr, cfg.loc)
@@ -204,6 +212,13 @@ func runPush(ctx context.Context, startStr, endStr string) error {
 
 	for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
 		date := day.Format(dateLayout)
+		if dryRun {
+			fmt.Printf("  %s (%d event(s), not pushed)\n", date, len(byDate[date]))
+			for _, e := range byDate[date] {
+				fmt.Printf("    %s\n", describe(e))
+			}
+			continue
+		}
 		if err := genki.PostEvents(httpClient, cfg.genkiURL, cfg.genkiPassword, date, byDate[date]); err != nil {
 			return err
 		}
@@ -247,6 +262,32 @@ func parseDate(value string, loc *time.Location) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid date format: %q (expected YYYY-MM-DD)", value)
 	}
 	return d, nil
+}
+
+// describe renders one mapped event for --dry-run. The flags are the point:
+// an all-day event or one that isn't busy contributes no time, so a day full of
+// birthdays is correctly reported as wide open, and that needs to be visible
+// rather than looking like a sync that found nothing.
+func describe(e events.Event) string {
+	when := fmt.Sprintf("%s-%s", e.Start, e.End)
+	if e.AllDay {
+		when = "all day"
+	}
+	flags := []string{}
+	if !e.Busy {
+		flags = append(flags, "not busy")
+	}
+	if e.Away {
+		flags = append(flags, "away")
+	}
+	summary := e.Summary
+	if summary == "" {
+		summary = "(no title)"
+	}
+	if len(flags) == 0 {
+		return fmt.Sprintf("%-11s %s", when, summary)
+	}
+	return fmt.Sprintf("%-11s %s  [%s]", when, summary, strings.Join(flags, ", "))
 }
 
 // hasCalendar checks the event calendars, not every collection: naming a
