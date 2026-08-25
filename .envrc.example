@@ -1,0 +1,22 @@
+# Apple ID. Also used to find your own PARTSTAT among an event's attendees,
+# so a colleague declining doesn't look like your morning freeing up.
+export ICLOUD_USERNAME="you@example.com"
+
+# An app-specific password from appleid.apple.com. A normal Apple ID password
+# will not authenticate against CalDAV.
+export ICLOUD_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+
+# Optional. The account's real calendar host is discovered from here.
+export ICLOUD_CALDAV_URL="https://caldav.icloud.com/"
+
+# Optional. Events in this calendar mark the day as "away", which is how a
+# holiday reaches Maureen without you having to tell her.
+# Run `calendar-sync calendars` to see the exact names.
+export AWAY_CALENDAR="Holidays"
+
+# Required, no default: Genki stores local times and a container's clock is UTC
+# unless told otherwise.
+export CALENDAR_TZ="Europe/London"
+
+export GENKI_URL="http://localhost:8080"
+export GENKI_PASSWORD="your-password-here"

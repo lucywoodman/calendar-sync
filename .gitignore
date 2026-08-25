@@ -1,0 +1,17 @@
+# Binaries
+/bin/
+*.test
+*.out
+/calendar-sync
+
+# Environment
+.envrc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
