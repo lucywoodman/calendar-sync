@@ -274,3 +274,18 @@ END:VEVENT`, "2026-06-14", false)
 		t.Error("want a summary-less event to still count as busy")
 	}
 }
+
+func TestConvert_RejectsAnEventThatArrivedWithNoStart(t *testing.T) {
+	// go-ical returns a zero time and no error for a missing DTSTART, so an
+	// event stripped of its properties would be quietly dropped and the day
+	// would look free. iCloud really does strip them if the calendar-data
+	// request asks for properties in bulk, and this went unnoticed through
+	// several apparently clean syncs.
+	e := parseEvent(t, `
+BEGIN:VEVENT
+UID:stripped-1
+END:VEVENT`)
+	if _, _, err := mapper(t).Convert(e, day(t, "2026-06-14"), false); err == nil {
+		t.Fatal("want an error for an event that arrived with no DTSTART")
+	}
+}

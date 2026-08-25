@@ -50,6 +50,16 @@ type Mapper struct {
 func (m Mapper) Convert(e ical.Event, day time.Time, away bool) (Event, bool, error) {
 	uid, _ := e.Props.Text(ical.PropUID)
 	summary, _ := e.Props.Text(ical.PropSummary)
+
+	// An event with no DTSTART isn't an event that happens on some other day -
+	// it's one that arrived without the property saying when it is. go-ical
+	// reports a zero time and no error for that, so left unchecked it gets
+	// silently discarded and the day reads as free. That is exactly how a
+	// server quietly stripping properties stayed invisible.
+	if e.Props.Get(ical.PropDateTimeStart) == nil {
+		return Event{}, false, fmt.Errorf("event %q arrived with no DTSTART", summary)
+	}
+
 	out := Event{UID: uid, Summary: summary, Busy: m.busy(e), Away: away}
 
 	if isAllDay(e) {

@@ -116,14 +116,33 @@ type QueryResult struct {
 }
 
 func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, end time.Time) (QueryResult, error) {
-	// Ask for the whole object rather than naming the components wanted.
-	// Spelling out <comp name="VEVENT"> got VEVENTs back with no properties at
-	// all from iCloud - the right events, entirely empty - so allcomp it is.
-	// Nothing here needs less than the full event anyway.
+	// Every property is named individually because iCloud ignores the wholesale
+	// forms. Asked with <allprop/> inside <comp name="VEVENT"> it returns the
+	// event carrying no properties; asked with <allcomp/> it returns the
+	// calendar carrying no components. Both times it honoured the structure
+	// named and dropped everything requested in bulk, and both times the result
+	// was a clean, empty-looking sync rather than an error.
+	//
+	// A property missing from this list simply won't arrive, so anything
+	// events.Mapper reads has to be listed here.
 	compRequest := caldav.CalendarCompRequest{
-		Name:     ical.CompCalendar,
-		AllProps: true,
-		AllComps: true,
+		Name:  ical.CompCalendar,
+		Props: []string{ical.PropVersion},
+		Comps: []caldav.CalendarCompRequest{{
+			Name: ical.CompEvent,
+			Props: []string{
+				ical.PropUID,
+				ical.PropSummary,
+				ical.PropDateTimeStart,
+				ical.PropDateTimeEnd,
+				ical.PropDuration, // some events carry a duration instead of DTEND
+				ical.PropStatus,
+				ical.PropTransparency,
+				ical.PropAttendee, // PARTSTAT rides along as a parameter
+				ical.PropRecurrenceRule,
+				ical.PropRecurrenceID,
+			},
+		}},
 	}
 	if c.ExpandRecurrences {
 		compRequest.Expand = &caldav.CalendarExpandRequest{Start: start, End: end}
