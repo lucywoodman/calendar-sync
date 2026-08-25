@@ -48,13 +48,13 @@ func newRootCmd() *cobra.Command {
 
 func newPushCmd() *cobra.Command {
 	var startStr, endStr string
-	var dryRun bool
+	var dryRun, noExpand bool
 
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Fetch events and push them to Genki Tracker",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runPush(cmd.Context(), startStr, endStr, dryRun)
+			return runPush(cmd.Context(), startStr, endStr, dryRun, noExpand)
 		},
 	}
 	cmd.Flags().StringVar(&startStr, "start", "", "First date to sync (YYYY-MM-DD, default: today)")
@@ -62,6 +62,10 @@ func newPushCmd() *cobra.Command {
 	// Checking the mapping shouldn't need somewhere to push to. Without this,
 	// working out why a day looked free meant running against a live Genki.
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be pushed, and push nothing")
+	// An escape hatch, not a preference: without expansion a recurring event
+	// only registers on its first occurrence. It exists so a server that
+	// mishandles the request can be identified rather than guessed at.
+	cmd.Flags().BoolVar(&noExpand, "no-expand", false, "Don't ask the server to expand recurring events (diagnostic)")
 	return cmd
 }
 
@@ -149,7 +153,7 @@ func loadConfig() (config, error) {
 	return cfg, nil
 }
 
-func runPush(ctx context.Context, startStr, endStr string, dryRun bool) error {
+func runPush(ctx context.Context, startStr, endStr string, dryRun, noExpand bool) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -168,6 +172,8 @@ func runPush(ctx context.Context, startStr, endStr string, dryRun bool) error {
 	if err != nil {
 		return err
 	}
+	client.ExpandRecurrences = !noExpand
+
 	if cfg.awayCalendar != "" && !hasCalendar(client, cfg.awayCalendar) {
 		// Loud, because the silent version is a holiday that never registers.
 		return fmt.Errorf("AWAY_CALENDAR is %q but no calendar of that name exists; run `calendar-sync calendars` to see the names", cfg.awayCalendar)

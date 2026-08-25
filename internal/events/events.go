@@ -111,7 +111,11 @@ func Diagnose(e ical.Event, loc *time.Location) string {
 	if e.Props.Get(ical.PropRecurrenceID) != nil {
 		recurring = "expanded occurrence"
 	}
-	return fmt.Sprintf("%s  start=%s recurring=%s allDay=%t", summary, start, recurring, isAllDay(e))
+	// The property count is the fastest tell: an event with none came back as
+	// an empty shell, which is a calendar-data request the server didn't like,
+	// not a disagreement about dates.
+	return fmt.Sprintf("%s  start=%s recurring=%s allDay=%t props=%d",
+		summary, start, recurring, isAllDay(e), len(e.Props))
 }
 
 // busy answers whether the event actually occupies Lucy's time. A meeting she

@@ -23,6 +23,13 @@ const DefaultURL = "https://caldav.icloud.com/"
 type Client struct {
 	dav       *caldav.Client
 	calendars []caldav.Calendar
+
+	// ExpandRecurrences asks the server to return each occurrence of a
+	// recurring event separately. On by default, because without it a weekly
+	// stand-up arrives as one event with a rule attached and 09:30 looks free
+	// every week but the first. Switchable so that a server which mishandles
+	// the request can be identified rather than guessed at.
+	ExpandRecurrences bool
 }
 
 // Connect authenticates with an app-specific password and discovers the
@@ -46,7 +53,7 @@ func Connect(ctx context.Context, endpoint, username, password string, timeout t
 	if err != nil {
 		return nil, fmt.Errorf("listing calendars: %w", err)
 	}
-	return &Client{dav: dav, calendars: calendars}, nil
+	return &Client{dav: dav, calendars: calendars, ExpandRecurrences: true}, nil
 }
 
 // Calendars lists every discovered collection, including ones that hold no
@@ -87,13 +94,21 @@ func SupportsEvents(cal caldav.Calendar) bool {
 // back as a single event with a recurrence rule, which would leave 09:30 looking
 // free every day but the first.
 func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, end time.Time) ([]ical.Event, error) {
+	// Ask for the whole object rather than naming the components wanted.
+	// Spelling out <comp name="VEVENT"> got VEVENTs back with no properties at
+	// all from iCloud - the right events, entirely empty - so allcomp it is.
+	// Nothing here needs less than the full event anyway.
+	compRequest := caldav.CalendarCompRequest{
+		Name:     ical.CompCalendar,
+		AllProps: true,
+		AllComps: true,
+	}
+	if c.ExpandRecurrences {
+		compRequest.Expand = &caldav.CalendarExpandRequest{Start: start, End: end}
+	}
+
 	query := &caldav.CalendarQuery{
-		CompRequest: caldav.CalendarCompRequest{
-			Name:     ical.CompCalendar,
-			AllProps: true,
-			Comps:    []caldav.CalendarCompRequest{{Name: ical.CompEvent, AllProps: true}},
-			Expand:   &caldav.CalendarExpandRequest{Start: start, End: end},
-		},
+		CompRequest: compRequest,
 		CompFilter: caldav.CompFilter{
 			Name:  ical.CompCalendar,
 			Comps: []caldav.CompFilter{{Name: ical.CompEvent, Start: start, End: end}},
