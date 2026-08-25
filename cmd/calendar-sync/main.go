@@ -204,6 +204,11 @@ func runPush(ctx context.Context, startStr, endStr string, dryRun, noExpand, deb
 		fmt.Printf("  %s: %d object(s), %d event(s) for %s..%s\n",
 			cal.Name, found.Objects, len(found.Events),
 			start.Format(dateLayout), queryEnd.Format(dateLayout))
+		if debug {
+			for i, shape := range found.Structure {
+				fmt.Printf("    object %d: %s\n", i+1, shape)
+			}
+		}
 		for _, raw := range found.Events {
 			mapped := false
 			for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {

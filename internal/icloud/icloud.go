@@ -107,6 +107,12 @@ func SupportsEvents(cal caldav.Calendar) bool {
 type QueryResult struct {
 	Objects int
 	Events  []ical.Event
+
+	// Structure describes each returned object: the top-level component, the
+	// child components inside it, and how many properties it carried. When the
+	// bytes clearly arrived but no events came out, this is the only thing that
+	// says whether the parse produced nothing or produced something unexpected.
+	Structure []string
 }
 
 func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, end time.Time) (QueryResult, error) {
@@ -139,8 +145,15 @@ func (c *Client) EventsBetween(ctx context.Context, cal caldav.Calendar, start, 
 	result := QueryResult{Objects: len(objects)}
 	for _, object := range objects {
 		if object.Data == nil {
+			result.Structure = append(result.Structure, "no calendar data")
 			continue
 		}
+		children := map[string]int{}
+		for _, child := range object.Data.Children {
+			children[child.Name]++
+		}
+		result.Structure = append(result.Structure, fmt.Sprintf(
+			"%s props=%d children=%v", object.Data.Name, len(object.Data.Props), children))
 		result.Events = append(result.Events, object.Data.Events()...)
 	}
 	return result, nil
